@@ -106,7 +106,6 @@ async def on_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     wait_msg = await update.message.reply_text("🤔 Думаю...")
 
-    # FALLBACK МОДЕЛИ
     models = [
         "qwen/qwen3-next-80b-a3b-instruct:free",
         "openai/gpt-oss-120b:free",
@@ -127,7 +126,7 @@ async def on_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
             HISTORY[cid].append({"role": "assistant", "content": answer})
             success = True
             break
-            
+
         except Exception as e:
             print(f"Ошибка {model_name}: {str(e)[:50]}")
             if "429" in str(e) or "rate limit" in str(e).lower():
