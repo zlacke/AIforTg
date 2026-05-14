@@ -20,27 +20,24 @@ logging.basicConfig(level=logging.INFO)
 log = logging.getLogger("ai-bot")
 
 SYSTEM_PROMPT = (
-    "Ты полезный помощник таксист в Telegram. "
-    "Отвечай по-русски, кратко и по делу. "
-    "Если про погоду, пробки или аэропорт — дай конкретный ответ."
+    "Ты полезный помощник в Telegram. "
+    "Отвечай по-русски, кратко и по делу."
+)
 
 KEYWORDS = ["погода", "пробки", "холодно", "жарко", "пулкаш", "пулково"]
-AI_TRIGGERS = ["бот", "подскажи", "вопрос", "ии"]
-
 HISTORY = defaultdict(lambda: deque(maxlen=20))
 
 async def test(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text("✅ Все команды работают!")
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    msg = (
+    await update.message.reply_text(
         "🤖 Бот готов!\n\n"
-        "• Обращайся ко мне со словом 'Бот' — и я отвечу\n"
         "• /pulkovo — рейсы Пулково\n"
         "• /reset — очистить чат\n"
-        "• /test — проверить бота"
+        "• /test — проверить бота\n"
+        "• Напиши: бот ... — чтобы спросить AI"
     )
-    await update.message.reply_text(msg)
 
 async def reset(update: Update, context: ContextTypes.DEFAULT_TYPE):
     HISTORY[update.effective_chat.id].clear()
@@ -52,9 +49,10 @@ async def pulkovo(update: Update, context: ContextTypes.DEFAULT_TYPE):
     params = {
         "api_key": AIRLABS_KEY,
         "dep_iata": "LED",
-        "limit": 15,
+        "limit": 10,
         "direction": "departures",
     }
+
     try:
         async with httpx.AsyncClient(timeout=15.0) as http:
             resp = await http.get(url, params=params)
@@ -96,17 +94,15 @@ async def on_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
             await update.message.reply_text("🚗 Пробки? Спроси подробнее!")
             return
 
-    has_trigger = any(t in low for t in AI_TRIGGERS)
-    is_reply_to_bot = (
-        update.message.reply_to_message
-        and update.message.reply_to_message.from_user
-        and update.message.reply_to_message.from_user.id == context.bot.id
-    )
-
-    if not (has_trigger or is_reply_to_bot):
+    if not low.startswith("бот "):
         return
 
-    HISTORY[cid].append({"role": "user", "content": text})
+    prompt = text[4:].strip()
+    if not prompt:
+        await update.message.reply_text("Напиши после слова 'бот' свой вопрос.")
+        return
+
+    HISTORY[cid].append({"role": "user", "content": prompt})
     messages = [{"role": "system", "content": SYSTEM_PROMPT}] + list(HISTORY[cid])
 
     wait_msg = await update.message.reply_text("🤔 Думаю...")
@@ -121,7 +117,6 @@ async def on_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
         answer = resp.choices[0].message.content.strip()
         await wait_msg.edit_text(answer)
         HISTORY[cid].append({"role": "assistant", "content": answer})
-
     except Exception as e:
         log.exception("OpenRouter")
         await wait_msg.edit_text(f"❌ Ошибка AI: {str(e)[:100]}")
