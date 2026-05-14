@@ -8,6 +8,7 @@ from openai import AsyncOpenAI
 from telegram import Update
 from telegram.ext import Application, CommandHandler, MessageHandler, ContextTypes, filters
 
+# Токены из переменных окружения
 TG_TOKEN = os.environ["7962775610:AAFl9uWxHYKrAMfVI6ByAI8RCYNL8Y3PNGM"]
 DS_KEY = os.environ["sk-7cd75c9ecf5c4be8b27625606ea47c25"]
 AIRLABS_KEY = os.environ["7802447b-4d2f-4401-8392-ff6913502595"]
@@ -22,101 +23,123 @@ log = logging.getLogger("ai-bot")
 
 SYSTEM_PROMPT = (
     "Ты полезный помощник в Telegram. "
-    "Отвечай по-русски, кратко и по делу."
+    "Отвечай по-русски, кратко и по делу. "
+    "Если про погоду, пробки или аэропорт — дай конкретный ответ."
 )
 
 KEYWORDS = ["погода", "пробки", "холодно", "жарко", "пулкаш", "пулково"]
 
 HISTORY = defaultdict(lambda: deque(maxlen=20))
 
+async def test(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Тест команд"""
+    await update.message.reply_text("✅ Все команды работают!")
+
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(
-        "Бот запущен.\n"
-        "Пиши текстом — я отвечу.\n"
-        "/reset — очистить историю\n"
-        "/pulkovo — ближайшие рейсы"
+        "🤖 Бот готов!\n\n"
+        "• Пиши текстом — отвечу\n"
+        "• /pulkovo — рейсы Пулково\n"
+        "• /reset — очистить чат\n"
+        "• /test — проверить бота"
     )
 
 async def reset(update: Update, context: ContextTypes.DEFAULT_TYPE):
     HISTORY[update.effective_chat.id].clear()
-    await update.message.reply_text("История очищена.")
+    await update.message.reply_text("🗑️ История очищена")
 
 async def pulkovo(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Расписание рейсов Пулково"""
+    await update.message.reply_text("🔄 Загружаю рейсы...")
+    
     url = "https://airlabs.co/api/v9/schedules"
     params = {
         "api_key": AIRLABS_KEY,
-        "dep_iata": "LED",
-        "limit": 10,
+        "dep_iata": "LED", 
+        "limit": 15,
+        "direction": "departures"
     }
 
     try:
-        async with httpx.AsyncClient(timeout=20) as http:
-            r = await http.get(url, params=params)
-            data = r.json()
-
-        items = data.get("response", [])[:10]
-        if not items:
-            await update.message.reply_text("Ближайших рейсов не нашёл.")
+        async with httpx.AsyncClient(timeout=15.0) as http:
+            resp = await http.get(url, params=params)
+            data = resp.json()
+        
+        flights = data.get("response", [])
+        if not flights:
+            await update.message.reply_text("❌ Рейсов не найдено")
             return
-
-        lines = ["✈️ Ближайшие рейсы Пулково:"]
-        for item in items:
-            flight = item.get("flight", {}).get("iata", "—")
-            dep = item.get("dep_time", {}).get("utc", item.get("dep_time", {}).get("local", "—"))
-            arr = item.get("arr_time", {}).get("utc", item.get("arr_time", {}).get("local", "—"))
-            dest = item.get("arr_iata", "—")
-            status = item.get("status", "—")
-            lines.append(f"{flight} → {dest} | вылет: {dep} | прилёт: {arr} | {status}")
-
-        await update.message.reply_text("\n".join(lines[:15]))
-
+            
+        msg = ["✈️ **Ближайшие вылеты Пулково:**\n"]
+        for flight in flights[:10]:
+            try:
+                flt = flight.get("flight_icao", "—")
+                dest = flight.get("arr_iata", "—") 
+                dep = flight.get("dep_time_local", "—")
+                status = flight.get("status", "—")
+                msg.append(f"`{flt}` → `{dest}` | {dep} | {status}")
+            except:
+                continue
+                
+        await update.message.reply_text("\n".join(msg), parse_mode="Markdown")
+        
     except Exception as e:
-        log.exception("AirLabs error")
-        await update.message.reply_text(f"Ошибка AirLabs: {e}")
+        log.exception("AirLabs")
+        await update.message.reply_text(f"❌ AirLabs: {str(e)[:100]}")
 
 async def on_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
     cid = update.effective_chat.id
     text = update.message.text.strip()
     low = text.lower()
+    words = [w.strip(".,!?") for w in low.split()]
 
-    words = low.split()
-if any(k in low for k in KEYWORDS) or any(k in words for k in KEYWORDS):
-        if "пулк" in low:
-            await update.message.reply_text("Хочешь посмотреть ближайшие рейсы Пулково? Напиши /pulkovo")
+    # Ключевые слова
+    if any(k in low or k in words for k in KEYWORDS):
+        if any(k in ["пулкаш", "пулково"] for k in words) or "пулк" in low:
+            await update.message.reply_text("✈️ Рейсы Пулково: `/pulkovo`", parse_mode="Markdown")
             return
-        if "погода" in low or "холодно" in low or "жарко" in low:
-            await update.message.reply_text("Хочешь узнать погоду подробнее? Просто задай мне вопрос.")
+        if any(k in ["погода", "холодно", "жарко"] for k in words):
+            await update.message.reply_text("🌤️ Хочешь точную погоду? Спроси!")
             return
-        if "пробки" in low:
-            await update.message.reply_text("Хочешь узнать подробности про пробки? Просто задай мне вопрос.")
+        if "пробки" in words:
+            await update.message.reply_text("🚗 Пробки? Спроси подробнее!")
             return
 
+    # DeepSeek
     HISTORY[cid].append({"role": "user", "content": text})
-    messages = [{"role": "system", "content": SYSTEM_PROMPT}, *HISTORY[cid]]
+    messages = [{"role": "system", "content": SYSTEM_PROMPT}] + list(HISTORY[cid])
 
-    placeholder = await update.message.reply_text("…")
-
+    await update.message.reply_text("🤔 Думаю...")
+    
     try:
         resp = await client.chat.completions.create(
             model="deepseek-chat",
             messages=messages,
             temperature=0.7,
-            max_tokens=1200,
+            max_tokens=1000,
         )
-        answer = resp.choices[0].message.content.strip() or "Не смог ответить."
-        await placeholder.edit_text(answer[:4000])
+        answer = resp.choices[0].message.content.strip()
+        await update.message.reply_text(answer)
         HISTORY[cid].append({"role": "assistant", "content": answer})
+        
     except Exception as e:
-        log.exception("DeepSeek error")
-        await placeholder.edit_text(f"Ошибка: {e}")
+        log.exception("DeepSeek")
+        await update.message.reply_text(f"❌ Ошибка AI: {str(e)[:100]}")
 
 def main():
     app = Application.builder().token(TG_TOKEN).build()
+    
+    # Команды (ВАЖНО: порядок!)
+    app.add_handler(CommandHandler("test", test))
     app.add_handler(CommandHandler("start", start))
     app.add_handler(CommandHandler("reset", reset))
     app.add_handler(CommandHandler("pulkovo", pulkovo))
+    
+    # Текст
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, on_text))
-    app.run_polling()
+    
+    print("🚀 Бот запускается...")
+    app.run_polling(drop_pending_updates=True)
 
 if __name__ == "__main__":
     main()
