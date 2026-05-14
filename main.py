@@ -22,10 +22,7 @@ client = AsyncOpenAI(
 logging.basicConfig(level=logging.INFO)
 log = logging.getLogger("ai-bot")
 
-SYSTEM_PROMPT = (
-    "Ты полезный помощник в Telegram. "
-    "Отвечай по-русски, кратко и по делу. "
-    "Если про погоду, пробки или аэропорт — дай конкретный ответ."
+SYSTEM_PROMPT = "Ты полезный помощник таксист в Telegram. Отвечай по-русски, кратко и по делу. Если про погоду, пробки или аэропорт — дай конкретный ответ."
 )
 
 # Жесткие ответы-заглушки
@@ -40,14 +37,13 @@ async def test(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text("✅ Все команды работают!")
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await update.message.reply_text(
-        """🤖 Бот готов!
+    msg = "🤖 Бот готов!
 
 • Обращайся ко мне со словом 'Бот' — и я отвечу
 • /pulkovo — рейсы Пулково
 • /reset — очистить чат
-• /test — проверить бота"""
-    )
+• /test — проверить бота"
+    await update.message.reply_text(msg)
 
 async def reset(update: Update, context: ContextTypes.DEFAULT_TYPE):
     HISTORY[update.effective_chat.id].clear()
