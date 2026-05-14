@@ -1,6 +1,7 @@
 import os
 import logging
 from collections import defaultdict, deque
+import time
 
 import httpx
 from openai import AsyncOpenAI
@@ -11,14 +12,20 @@ TG_TOKEN = os.environ["TELEGRAM_BOT_TOKEN"]
 OR_KEY = os.environ["OPENROUTER_API_KEY"]
 AIRLABS_KEY = os.environ["AIRLABS_API_KEY"]
 
-# Основная модель (умная, но медленная) + быстрая запасная
-PRIMARY_MODEL = "qwen/qwen3-next-80b-a3b-instruct:free"
-FALLBACK_MODEL = "qwen/qwen-2.5-7b-instruct:free"  # Быстрая, 7B
+# 📋 Список моделей в порядке приоритета
+# OpenRouter free-тариф динамически маршрутизирует, поэтому фолбэк сильно повышает шанс быстрого ответа
+MODELS = [
+    "qwen/qwen3-next-80b-a3b-instruct:free",
+    "nvidia/nemotron-3-super-120b-a12b:free",
+    "openai/gpt-oss-120b:free",
+    "nvidia/nemotron-3-nano-30b-a3b:free",
+    "qwen/qwen-2.5-7b-instruct:free"  # ⚡ Самый быстрый фолбэк
+]
 
 client = AsyncOpenAI(
     api_key=OR_KEY,
     base_url="https://openrouter.ai/api/v1",
-    timeout=httpx.Timeout(timeout=60.0, connect=10.0)  # 60 сек вместо 120
+    timeout=httpx.Timeout(timeout=40.0, connect=10.0)  # 40 сек на попытку
 )
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s")
@@ -103,31 +110,46 @@ async def on_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
     messages = [{"role": "system", "content": SYSTEM_PROMPT}] + list(HISTORY[cid])
 
     wait_msg = await update.message.reply_text("⚡ Думаю...")
+    start_time = time.time()
+    success = False
 
-    # Пробуем основную модель, если долго — быстро падаем на запасную
-    for model_name in [PRIMARY_MODEL, FALLBACK_MODEL]:
+    for model_name in MODELS:
+        # Если ждём больше 50 сек суммарно — прекращаем перебор
+        if time.time() - start_time > 50:
+            break
+            
         try:
             resp = await client.chat.completions.create(
                 model=model_name,
                 messages=messages,
                 temperature=0.7,
-                max_tokens=300,  # ⚡ Короткие ответы = быстрее (было 1000)
+                max_tokens=300,  # Короткие ответы = быстрее
             )
             answer = resp.choices[0].message.content.strip()
-            if model_name == FALLBACK_MODEL:
-                answer = f"⚡ (быстрый режим)\n{answer}"
+            
+            # Помечаем, если ответила не основная модель
+            if model_name != MODELS[0]:
+                short_name = model_name.split("/")[-1].split(":")[0]
+                answer = f"⚡ ({short_name})\n{answer}"
+                
             await wait_msg.edit_text(answer)
             HISTORY[cid].append({"role": "assistant", "content": answer})
-            break  # Успех — выходим из цикла
+            success = True
+            break
+            
         except Exception as e:
             err = str(e).lower()
-            if "429" in err or "rate limit" in err or "timeout" in err:
-                log.warning(f"{model_name} медленный/лимит, пробуем следующую...")
-                continue  # Пробуем следующую модель в списке
+            # OpenRouter free часто кидает 429, 503, timeout или "overloaded"
+            if any(x in err for x in ["429", "rate limit", "timeout", "overloaded", "busy", "503"]):
+                log.warning(f"{model_name} занята/лимит, пробую следующую...")
+                continue
             else:
                 log.error(f"Model error {model_name}: {e}")
-                await wait_msg.edit_text("⚠️ Ошибка. Попробуй позже.")
+                await wait_msg.edit_text("⚠️ Ошибка генерации. Попробуй позже.")
                 break
+
+    if not success:
+        await wait_msg.edit_text("⏳ Все модели сейчас загружены. Подожди ~1 мин и попробуй снова.")
 
 def main():
     app = Application.builder().token(TG_TOKEN).build()
@@ -136,7 +158,7 @@ def main():
     app.add_handler(CommandHandler("reset", reset))
     app.add_handler(CommandHandler("pulkovo", pulkovo))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, on_text))
-    print(f"🚀 Бот запущен: {PRIMARY_MODEL} + {FALLBACK_MODEL} (fallback)")
+    print(f"🚀 Бот запущен. Цепочка моделей: {len(MODELS)}")
     app.run_polling(drop_pending_updates=True)
 
 if __name__ == "__main__":
