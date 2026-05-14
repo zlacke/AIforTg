@@ -73,7 +73,7 @@ async def pulkovo(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
         await update.message.reply_text("\n".join(msg))
 
-        except Exception as e:
+    except Exception as e:
         log.exception("OpenRouter")
         msg = str(e)
         if "429" in msg:
