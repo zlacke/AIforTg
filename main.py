@@ -1,6 +1,7 @@
 import os
 import logging
 from collections import defaultdict, deque
+
 import httpx
 from openai import AsyncOpenAI
 from telegram import Update
@@ -10,31 +11,35 @@ TG_TOKEN = os.environ["TELEGRAM_BOT_TOKEN"]
 OR_KEY = os.environ["OPENROUTER_API_KEY"]
 AIRLABS_KEY = os.environ["AIRLABS_API_KEY"]
 
+MODEL_NAME = "qwen/qwen3-next-80b-a3b-instruct:free"
+
 client = AsyncOpenAI(
     api_key=OR_KEY,
     base_url="https://openrouter.ai/api/v1",
-    max_retries=0,
-    timeout=10.0,
+    timeout=httpx.Timeout(timeout=120.0, connect=10.0)
 )
 
-logging.basicConfig(level=logging.INFO)
+logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s")
 log = logging.getLogger("ai-bot")
 
-SYSTEM_PROMPT = "Ты полезный помощник таксист в Telegram. Отвечай по-русски, кратко и по делу."
+SYSTEM_PROMPT = (
+    "Ты полезный помощник таксист в Telegram. "
+    "Отвечай по-русски, кратко и по делу."
+)
 
 KEYWORDS = ["погода", "пробки", "холодно", "жарко", "пулкаш", "пулково"]
 HISTORY = defaultdict(lambda: deque(maxlen=20))
 
 async def test(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await update.message.reply_text("✅ Работает! Fallback включён.")
+    await update.message.reply_text("✅ Все команды работают!")
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(
-        "🤖 Таксист-бот готов!\n\n"
-        "• /pulkovo — рейсы\n"
-        "• /reset — очистить\n"
-        "• /test — тест\n"
-        "• бот [вопрос] — AI"
+        "🤖 Бот готов!\n\n"
+        "• /pulkovo — рейсы Пулково\n"
+        "• /reset — очистить чат\n"
+        "• /test — проверить бота\n"
+        "• Напиши: бот ... — чтобы спросить AI"
     )
 
 async def reset(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -42,7 +47,7 @@ async def reset(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text("🗑️ История очищена")
 
 async def pulkovo(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await update.message.reply_text("🔄 Рейсы...")
+    await update.message.reply_text("🔄 Загружаю рейсы...")
     url = "https://airlabs.co/api/v9/schedules"
     params = {
         "api_key": AIRLABS_KEY,
@@ -50,83 +55,76 @@ async def pulkovo(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "limit": 10,
         "direction": "departures",
     }
-
     try:
-        async with httpx.AsyncClient(timeout=10.0) as http:
+        async with httpx.AsyncClient(timeout=15.0) as http:
             resp = await http.get(url, params=params)
             data = resp.json()
-
         flights = data.get("response", [])
         if not flights:
-            await update.message.reply_text("❌ Рейсов нет")
+            await update.message.reply_text("❌ Рейсов не найдено")
             return
-
-        msg = ["✈️ Вылеты:"]
-        for flight in flights[:8]:
+        msg = ["✈️ Ближайшие вылеты Пулково:"]
+        for flight in flights[:10]:
             flt = flight.get("flight_icao", "—")
             dest = flight.get("arr_iata", "—")
             dep = flight.get("dep_time_local", "—")
             status = flight.get("status", "—")
-            msg.append(f"`{flt} → {dest}` | {dep} | {status}")
-
-        await update.message.reply_text("\n".join(msg), parse_mode="Markdown")
-
+            msg.append(f"{flt} → {dest} | {dep} | {status}")
+        await update.message.reply_text("\n".join(msg))
     except Exception as e:
-        await update.message.reply_text(f"❌ {str(e)[:100]}")
+        log.exception("AirLabs error")
+        await update.message.reply_text(f"❌ AirLabs: {str(e)[:100]}")
 
 async def on_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
     cid = update.effective_chat.id
     text = update.message.text.strip()
     low = text.lower()
+    words = [w.strip(".,!?") for w in low.split()]
 
-    if any(k in low for k in KEYWORDS):
-        if "пулк" in low:
-            await update.message.reply_text("✈️ /pulkovo")
+    if any(k in low or k in words for k in KEYWORDS):
+        if any(k in ["пулкаш", "пулково"] for k in words) or "пулк" in low:
+            await update.message.reply_text("✈️ Рейсы Пулково: /pulkovo")
             return
-        await update.message.reply_text("Спроси AI: `бот [вопрос]`", parse_mode="Markdown")
-        return
+        if any(k in ["погода", "холодно", "жарко"] for k in words):
+            await update.message.reply_text("🌤️ Хочешь точную погоду? Спроси!")
+            return
+        if "пробки" in words:
+            await update.message.reply_text("🚗 Пробки? Спроси подробнее!")
+            return
 
     if not low.startswith("бот "):
         return
 
     prompt = text[4:].strip()
     if not prompt:
-        await update.message.reply_text("`бот [вопрос]`", parse_mode="Markdown")
+        await update.message.reply_text("Напиши после слова 'бот' свой вопрос.")
         return
 
     HISTORY[cid].append({"role": "user", "content": prompt})
     messages = [{"role": "system", "content": SYSTEM_PROMPT}] + list(HISTORY[cid])
 
-    wait_msg = await update.message.reply_text("🤔")
+    wait_msg = await update.message.reply_text("🤔 Думаю...")
 
-    models = [
-        "qwen/qwen3-next-80b-a3b-instruct:free",
-        "openai/gpt-oss-120b:free",
-        "google/gemma-4-26b-a4b-it:free",
-    ]
-
-    success = False
-    for model in models:
-        try:
-            resp = await client.chat.completions.create(
-                model=model,
-                messages=messages,
-                temperature=0.7,
-                max_tokens=800
-            )
-            answer = resp.choices[0].message.content.strip()
-            await wait_msg.edit_text(answer)
-            HISTORY[cid].append({"role": "assistant", "content": answer})
-            success = True
-            break
-        except Exception as e:
-            if "429" in str(e) or "rate limit" in str(e).lower():
-                continue
-            await wait_msg.edit_text("⚠️ Я пока не в ресурсе.")
-            break
-
-    if not success:
-        await wait_msg.edit_text("⚠️ Я на заказе.")
+    try:
+        resp = await client.chat.completions.create(
+            model=MODEL_NAME,
+            messages=messages,
+            temperature=0.7,
+            max_tokens=1000,
+        )
+        answer = resp.choices[0].message.content.strip()
+        await wait_msg.edit_text(answer)
+        HISTORY[cid].append({"role": "assistant", "content": answer})
+    except Exception as e:
+        err = str(e).lower()
+        if "429" in err or "rate limit" in err:
+            await wait_msg.edit_text("⏳ Лимит запросов. Подожди ~30 сек.")
+        elif "context_length" in err or "too long" in err:
+            HISTORY[cid].clear()
+            await wait_msg.edit_text("🔄 Контекст переполнен. Начни сначала.")
+        else:
+            log.error(f"Model error: {e}")
+            await wait_msg.edit_text("⚠️ Ошибка. Попробуй позже.")
 
 def main():
     app = Application.builder().token(TG_TOKEN).build()
@@ -135,7 +133,7 @@ def main():
     app.add_handler(CommandHandler("reset", reset))
     app.add_handler(CommandHandler("pulkovo", pulkovo))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, on_text))
-    print("🚀 Бот запущен!")
+    print(f"🚀 Бот запущен с моделью: {MODEL_NAME}")
     app.run_polling(drop_pending_updates=True)
 
 if __name__ == "__main__":
