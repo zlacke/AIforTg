@@ -73,9 +73,13 @@ async def pulkovo(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
         await update.message.reply_text("\n".join(msg))
 
-    except Exception as e:
-        log.exception("AirLabs")
-        await update.message.reply_text(f"❌ AirLabs: {str(e)[:100]}")
+        except Exception as e:
+        log.exception("OpenRouter")
+        msg = str(e)
+        if "429" in msg:
+            await wait_msg.edit_text("⚠️ AI сломалася. Давай потом.")
+        else:
+            await wait_msg.edit_text("⚠️ AI временно недоступен.")
 
 async def on_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
     cid = update.effective_chat.id
