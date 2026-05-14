@@ -41,16 +41,12 @@ async def test(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(
-        "🤖 Бот готов!
+        """🤖 Бот готов!
 
-"
-        "• Обращайся ко мне со словом 'Бот' — и я отвечу
-"
-        "• /pulkovo — рейсы Пулково
-"
-        "• /reset — очистить чат
-"
-        "• /test — проверить бота"
+• Обращайся ко мне со словом 'Бот' — и я отвечу
+• /pulkovo — рейсы Пулково
+• /reset — очистить чат
+• /test — проверить бота"""
     )
 
 async def reset(update: Update, context: ContextTypes.DEFAULT_TYPE):
