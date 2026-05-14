@@ -20,7 +20,7 @@ logging.basicConfig(level=logging.INFO)
 log = logging.getLogger("ai-bot")
 
 SYSTEM_PROMPT = (
-    "Ты полезный помощник в Telegram. "
+    "Ты полезный помощник таксист в Telegram. "
     "Отвечай по-русски, кратко и по делу."
 )
 
@@ -109,7 +109,7 @@ async def on_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     try:
         resp = await client.chat.completions.create(
-            model="nvidia/nemotron-3-nano-omni-30b-a3b-reasoning:free",
+            model = "openai/gpt-oss-120b:free",
             messages=messages,
             temperature=0.7,
             max_tokens=1000,
@@ -121,9 +121,9 @@ async def on_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
         log.exception("OpenRouter")
         msg = str(e)
         if "429" in msg:
-            await wait_msg.edit_text("⚠️ AI сейчас перегружен. Попробуй позже.")
+            await wait_msg.edit_text("⚠️ Я пока не в ресурсе. Попробуй позже.")
         else:
-            await wait_msg.edit_text(f"⚠️ AI временно недоступен.")
+            await wait_msg.edit_text(f"⚠️ Я на заказе.")
 
 def main():
     app = Application.builder().token(TG_TOKEN).build()
