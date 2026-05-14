@@ -79,7 +79,8 @@ async def on_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
     text = update.message.text.strip()
     low = text.lower()
 
-    if any(k in low for k in KEYWORDS):
+    words = low.split()
+if any(k in low for k in KEYWORDS) or any(k in words for k in KEYWORDS):
         if "пулк" in low:
             await update.message.reply_text("Хочешь посмотреть ближайшие рейсы Пулково? Напиши /pulkovo")
             return
