@@ -11,21 +11,20 @@ TG_TOKEN = os.environ["TELEGRAM_BOT_TOKEN"]
 OR_KEY = os.environ["OPENROUTER_API_KEY"]
 AIRLABS_KEY = os.environ["AIRLABS_API_KEY"]
 
-MODEL_NAME = "qwen/qwen3-next-80b-a3b-instruct:free"
+# Основная модель (умная, но медленная) + быстрая запасная
+PRIMARY_MODEL = "qwen/qwen3-next-80b-a3b-instruct:free"
+FALLBACK_MODEL = "qwen/qwen-2.5-7b-instruct:free"  # Быстрая, 7B
 
 client = AsyncOpenAI(
     api_key=OR_KEY,
     base_url="https://openrouter.ai/api/v1",
-    timeout=httpx.Timeout(timeout=120.0, connect=10.0)
+    timeout=httpx.Timeout(timeout=60.0, connect=10.0)  # 60 сек вместо 120
 )
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s")
 log = logging.getLogger("ai-bot")
 
-SYSTEM_PROMPT = (
-    "Ты полезный помощник таксист в Telegram. "
-    "Отвечай по-русски, кратко и по делу."
-)
+SYSTEM_PROMPT = "Ты полезный помощник таксист в Telegram. Отвечай по-русски, кратко и по делу."
 
 KEYWORDS = ["погода", "пробки", "холодно", "жарко", "пулкаш", "пулково"]
 HISTORY = defaultdict(lambda: deque(maxlen=20))
@@ -103,28 +102,32 @@ async def on_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
     HISTORY[cid].append({"role": "user", "content": prompt})
     messages = [{"role": "system", "content": SYSTEM_PROMPT}] + list(HISTORY[cid])
 
-    wait_msg = await update.message.reply_text("🤔 Думаю...")
+    wait_msg = await update.message.reply_text("⚡ Думаю...")
 
-    try:
-        resp = await client.chat.completions.create(
-            model=MODEL_NAME,
-            messages=messages,
-            temperature=0.7,
-            max_tokens=1000,
-        )
-        answer = resp.choices[0].message.content.strip()
-        await wait_msg.edit_text(answer)
-        HISTORY[cid].append({"role": "assistant", "content": answer})
-    except Exception as e:
-        err = str(e).lower()
-        if "429" in err or "rate limit" in err:
-            await wait_msg.edit_text("⏳ Лимит запросов. Подожди ~30 сек.")
-        elif "context_length" in err or "too long" in err:
-            HISTORY[cid].clear()
-            await wait_msg.edit_text("🔄 Контекст переполнен. Начни сначала.")
-        else:
-            log.error(f"Model error: {e}")
-            await wait_msg.edit_text("⚠️ Ошибка. Попробуй позже.")
+    # Пробуем основную модель, если долго — быстро падаем на запасную
+    for model_name in [PRIMARY_MODEL, FALLBACK_MODEL]:
+        try:
+            resp = await client.chat.completions.create(
+                model=model_name,
+                messages=messages,
+                temperature=0.7,
+                max_tokens=300,  # ⚡ Короткие ответы = быстрее (было 1000)
+            )
+            answer = resp.choices[0].message.content.strip()
+            if model_name == FALLBACK_MODEL:
+                answer = f"⚡ (быстрый режим)\n{answer}"
+            await wait_msg.edit_text(answer)
+            HISTORY[cid].append({"role": "assistant", "content": answer})
+            break  # Успех — выходим из цикла
+        except Exception as e:
+            err = str(e).lower()
+            if "429" in err or "rate limit" in err or "timeout" in err:
+                log.warning(f"{model_name} медленный/лимит, пробуем следующую...")
+                continue  # Пробуем следующую модель в списке
+            else:
+                log.error(f"Model error {model_name}: {e}")
+                await wait_msg.edit_text("⚠️ Ошибка. Попробуй позже.")
+                break
 
 def main():
     app = Application.builder().token(TG_TOKEN).build()
@@ -133,7 +136,7 @@ def main():
     app.add_handler(CommandHandler("reset", reset))
     app.add_handler(CommandHandler("pulkovo", pulkovo))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, on_text))
-    print(f"🚀 Бот запущен с моделью: {MODEL_NAME}")
+    print(f"🚀 Бот запущен: {PRIMARY_MODEL} + {FALLBACK_MODEL} (fallback)")
     app.run_polling(drop_pending_updates=True)
 
 if __name__ == "__main__":
