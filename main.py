@@ -74,12 +74,8 @@ async def pulkovo(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text("\n".join(msg))
 
     except Exception as e:
-        log.exception("OpenRouter")
-        msg = str(e)
-        if "429" in msg:
-            await wait_msg.edit_text("⚠️ AI сломалася. Давай потом.")
-        else:
-            await wait_msg.edit_text("⚠️ AI временно недоступен.")
+        log.exception("AirLabs")
+        await update.message.reply_text(f"❌ AirLabs: {str(e)[:100]}")
 
 async def on_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
     cid = update.effective_chat.id
@@ -113,7 +109,7 @@ async def on_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     try:
         resp = await client.chat.completions.create(
-            model="meta-llama/llama-3.3-70b-instruct:free",
+            model="nvidia/nemotron-3-nano-omni-30b-a3b-reasoning:free",
             messages=messages,
             temperature=0.7,
             max_tokens=1000,
@@ -123,7 +119,11 @@ async def on_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
         HISTORY[cid].append({"role": "assistant", "content": answer})
     except Exception as e:
         log.exception("OpenRouter")
-        await wait_msg.edit_text(f"❌ Ошибка AI: {str(e)[:100]}")
+        msg = str(e)
+        if "429" in msg:
+            await wait_msg.edit_text("⚠️ AI сейчас перегружен. Попробуй позже.")
+        else:
+            await wait_msg.edit_text(f"⚠️ AI временно недоступен.")
 
 def main():
     app = Application.builder().token(TG_TOKEN).build()
