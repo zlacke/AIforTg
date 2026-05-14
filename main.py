@@ -109,7 +109,7 @@ async def on_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     try:
         resp = await client.chat.completions.create(
-            model="google/gemini-2.0-flash-lite-preview-02-05:free",
+            model="meta-llama/llama-3.3-70b-instruct:free",
             messages=messages,
             temperature=0.7,
             max_tokens=1000,
