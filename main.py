@@ -10,8 +10,8 @@ from telegram.ext import Application, CommandHandler, MessageHandler, ContextTyp
 
 # Токены из переменных окружения
 TG_TOKEN = os.environ["TELEGRAM_BOT_TOKEN"]
-DS_KEY = os.environ["sk-7cd75c9ecf5c4be8b27625606ea47c25"]
-AIRLABS_KEY = os.environ["7802447b-4d2f-4401-8392-ff6913502595"]
+DS_KEY = os.environ["DEEPSEEK_API_KEY"]
+AIRLABS_KEY = os.environ["AIRLABS_API_KEY"]
 
 client = AsyncOpenAI(
     api_key=DS_KEY,
