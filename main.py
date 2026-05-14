@@ -107,9 +107,17 @@ async def on_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     wait_msg = await update.message.reply_text("🤔 Думаю...")
 
+  models = [
+    "qwen/qwen3-next-80b-a3b-instruct:free",    
+    "openai/gpt-oss-120b:free",                 
+    "google/gemma-4-26b-a4b-it:free",           
+]
+
+success = False
+for model_name in models:
     try:
         resp = await client.chat.completions.create(
-            model = "openai/gpt-oss-120b:free",
+            model=model_name,
             messages=messages,
             temperature=0.7,
             max_tokens=1000,
@@ -117,14 +125,21 @@ async def on_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
         answer = resp.choices[0].message.content.strip()
         await wait_msg.edit_text(answer)
         HISTORY[cid].append({"role": "assistant", "content": answer})
+        success = True
+        break  # Успех!
+        
     except Exception as e:
-        log.exception("OpenRouter")
-        msg = str(e)
-        if "429" in msg:
-            await wait_msg.edit_text("⚠️ Я пока не в ресурсе. Попробуй позже.")
+        if "429" in str(e) or "rate limit" in str(e).lower():
+            print(f"429 для {model_name}, пробуем следующую...")
+            continue  # Следующая модель
+            
         else:
-            await wait_msg.edit_text(f"⚠️ Я на заказе.")
+            await wait_msg.edit_text("⚠️ Я пока не в ресурсе. Попробуй позже.")
+            break
 
+if not success:  # Все модели исчерпаны (429 или другая ошибка)
+    await wait_msg.edit_text("⚠️ Я на заказе.")
+    
 def main():
     app = Application.builder().token(TG_TOKEN).build()
     app.add_handler(CommandHandler("test", test))
